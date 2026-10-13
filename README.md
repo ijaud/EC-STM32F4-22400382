@@ -34,6 +34,33 @@ MCU:  STM32F411RE (Nucleo-64)
     + [GPIO_ospeed\(\)](#gpio_ospeed)
     + [GPIO_otype\(\)](#gpio_otype)
     + [GPIO_pupd\(\)](#gpio_pupd)
+  * [RCC (System / Peripheral Clock)](#rcc-system--peripheral-clock)
+    + [Header File](#header-file-1)
+    + [RCC_HSI_init\(\)](#rcc_hsi_init)
+    + [RCC_PLL_init\(\)](#rcc_pll_init)
+    + [RCC_GPIOA_enable\(\) / RCC_GPIOB_enable\(\) / RCC_GPIOC_enable\(\) / RCC_GPIOD_enable\(\)](#rcc_gpioa_enable--rcc_gpiob_enable--rcc_gpioc_enable--rcc_gpiod_enable)
+    + [delay_ms_HSI\(\)](#delay_ms_hsi)
+  * [SysTick (1 ms System Timer)](#systick-1-ms-system-timer)
+    + [Header File](#header-file-2)
+    + [SysTick_init\(\)](#systick_init)
+    + [SysTick_Handler\(\)](#systick_handler)
+    + [SysTick_counter\(\)](#systick_counter)
+    + [delay_ms\(\)](#delay_ms)
+    + [SysTick_reset\(\)](#systick_reset)
+    + [SysTick_val\(\)](#systick_val)
+  * [EXTI (External Interrupt)](#exti-external-interrupt)
+    + [Header File](#header-file-3)
+    + [EXTI_init\(\)](#exti_init)
+    + [EXTI_enable\(\) / EXTI_disable\(\)](#exti_enable--exti_disable)
+    + [is_pending_EXTI\(\)](#is_pending_exti)
+    + [clear_pending_EXTI\(\)](#clear_pending_exti)
+  * [Stepper Motor (FSM-based)](#stepper-motor-fsm-based)
+    + [Header File](#header-file-4)
+    + [stepper_init\(\)](#stepper_init)
+    + [stepper_speed\(\)](#stepper_speed)
+    + [stepper_step\(\)](#stepper_step)
+    + [stepper_out\(\)](#stepper_out)
+    + [stepper_stop\(\)](#stepper_stop)
 
 ---
 
@@ -231,9 +258,7 @@ void GPIO_pupd(PinName_t pinName, uint32_t pupd);
 GPIO_pupd(PC_13, PULL_UP);
 ```
 
-
-
-------
+---
 
 ## RCC (System / Peripheral Clock)
 
@@ -742,6 +767,10 @@ void EXTI15_10_IRQHandler(void) {
     }
 }
 ```
+
+------
+
+
 
 ## Class or Header name
 
