@@ -37,19 +37,19 @@ MCU:  STM32F411RE (Nucleo-64)
 
 ---
 
-## GPIO Digital InOut 
+## GPIO Digital In/Out
 
 ### Header File
 
- `#include "ecGPIO.h"`
+`#include "ecGPIO2.h"`
 
-
-```c++
+```c
 #include "stm32f411xe.h"
-#include "ecRCC.h"
+#include "ecRCC2.h"
+#include "ecPinNames.h"
 
-#ifndef __ECGPIO_H
-#define __ECGPIO_H
+#ifndef __ECGPIO2_H
+#define __ECGPIO2_H
 
 // MODER
 #define INPUT  		0x00
@@ -61,37 +61,31 @@ MCU:  STM32F411RE (Nucleo-64)
 #define HIGH 		1
 #define LOW  		0
 
-// OSPEED
+// OSPEEDR
 #define LOW_SPEED		0x00
-#define MID_SPEED		0x01
-#define FAST_SPEED		0x02
-#define HIGH_SPEED		0x03
+#define MEDIUM_SPEED	0x01
+#define FAST_SPEED		0x10
 
 // OTYPER
 #define PUSH_PULL 		0	// Push-pull
 #define OPEN_DRAIN 		1 	// Open-Drain
 
-// PUDR
+// PUPDR
 #define NO_PUPD			0x00 	// No pull-up, pull-down
 #define PULL_UP			0x01 	// Pull-up
-#define PULL_DOWN 		0x02 	// Pull-down	
-#define RESERVED 		0x03 	// Reserved
-
-// PIN
-#define LED_PIN 		5
-#define BUTTON_PIN 		13
+#define PULL_DOWN 		0x02 	// Pull-down
 
 #ifdef __cplusplus
  extern "C" {
 #endif /* __cplusplus */
-	 
-void GPIO_init(GPIO_TypeDef *Port, int pin, int mode);
-void GPIO_mode(GPIO_TypeDef* Port, int pin, int mode);
-void GPIO_write(GPIO_TypeDef *Port, int pin, int output);
-int  GPIO_read(GPIO_TypeDef *Port, int pin);
-void GPIO_ospeed(GPIO_TypeDef* Port, int pin, int speed);
-void GPIO_otype(GPIO_TypeDef* Port, int pin, int type);
-void GPIO_pupd(GPIO_TypeDef* Port, int pin, int pupd);
+
+void GPIO_init(PinName_t pinName, uint32_t mode);
+void GPIO_mode(PinName_t pinName, uint32_t mode);
+void GPIO_ospeed(PinName_t pinName, uint32_t speed);
+void GPIO_otype(PinName_t pinName, uint32_t type);
+void GPIO_pupd(PinName_t pinName, uint32_t pupd);
+void GPIO_write(PinName_t pinName, uint32_t Output);
+uint32_t GPIO_read(PinName_t pinName);
 
 #ifdef __cplusplus
 }
@@ -100,179 +94,142 @@ void GPIO_pupd(GPIO_TypeDef* Port, int pin, int pupd);
 #endif
 ```
 
+> **Note:** This is the v2 pin API. Instead of a separate `GPIO_TypeDef* Port` + `int pin` pair, every function takes a single `PinName_t` value (e.g. `PA_5`, `PC_13`) that encodes both the port and pin number. The mapping is resolved internally by `ecPinmap()` (declared in `ecPinNames.h`).
 
+### GPIO_init()
 
+Initializes a GPIO pin with its default settings and automatically enables that pin's port clock (`RCC_GPIOx_enable()`) before configuring the mode.
 
-### GPIO_init\(\)
-
-Initializes GPIO pins with default setting and Enables GPIO Clock. Mode: In/Out/AF/Analog
-
-```c++
-void GPIO_init(GPIO_TypeDef *Port, int pin, int mode);
+```c
+void GPIO_init(PinName_t pinName, uint32_t mode);
 ```
 
 **Parameters**
 
-* **Port:**  Port Number,  GPIOA~GPIOH
-
-* **pin**:  pin number (int) 0~15
-
-* **mode**:   INPUT(0), OUTPUT(1),  AF(02), ANALOG (03)
-
-  
+* **pinName**: pin to configure, e.g. `PA_5`, `PC_13`
+* **mode**: `INPUT` (0), `OUTPUT` (1), `AF` (2), `ANALOG` (3)
 
 **Example code**
 
-```c++
-GPIO_init(GPIOA, 5, OUTPUT);
-GPIO_init(GPIOC, 13, INPUT); //GPIO_init(GPIOC, 13, 0);
+```c
+GPIO_init(PA_5, OUTPUT);
+GPIO_init(PC_13, INPUT);
 ```
 
+### GPIO_mode()
 
+Configures a GPIO pin's mode (In/Out/AF/Analog) without touching its port clock. Called internally by `GPIO_init()`.
 
-### GPIO_mode\(\)
-
-Configures  GPIO pin modes: In/Out/AF/Analog
-
-```c++
-void GPIO_mode(GPIO_TypeDef *Port, int pin, int mode);
+```c
+void GPIO_mode(PinName_t pinName, uint32_t mode);
 ```
 
 **Parameters**
 
-* **Port:**  Port Number,  GPIOA~GPIOH
-
-* **pin**:  pin number (int) 0~15
-
-* **mode**:   INPUT (0), OUTPUT (1),  AF(02), ANALOG (03)
-
-  
+* **pinName**: pin to configure
+* **mode**: `INPUT` (0), `OUTPUT` (1), `AF` (2), `ANALOG` (3)
 
 **Example code**
 
-```c++
-GPIO_mode(GPIOA, 5, OUTPUT);
+```c
+GPIO_mode(PA_5, OUTPUT);
 ```
 
+### GPIO_write()
 
+Writes a digital level (HIGH/LOW) to a GPIO pin's output register.
 
-### GPIO_write\(\)
-
-Write the data to GPIO pin: High, Low
-
-```c++
-void GPIO_write(GPIO_TypeDef *Port, int pin, int output);
+```c
+void GPIO_write(PinName_t pinName, uint32_t Output);
 ```
 
 **Parameters**
 
-* **Port:**  Port Number,  GPIOA~GPIOH
-* **pin**:  pin number (int) 0~15
-* **output**:   LOW(0), HIGH(1)
-
-
+* **pinName**: pin to write to
+* **Output**: `LOW` (0) or `HIGH` (1)
 
 **Example code**
 
-```c++
-GPIO_write(GPIOA, 5, 1);  // 1: High
+```c
+GPIO_write(PA_5, HIGH);
 ```
 
+### GPIO_read()
 
+Reads the current digital level of a GPIO pin's input register.
 
-### GPIO_read\(\)
-
-Read the data from GPIO pin
-
-```c++
-int  GPIO_read(GPIO_TypeDef *Port, int pin);
+```c
+uint32_t GPIO_read(PinName_t pinName);
 ```
 
 **Parameters**
 
-* **Port:**  Port Number,  GPIOA~GPIOH
-* **pin**:  pin number (int) 0~15
+* **pinName**: pin to read
 
-
+**Returns**: `0` (LOW) or `1` (HIGH)
 
 **Example code**
 
-```c++
-GPIO_read(GPIOC, 13);
+```c
+uint32_t val = GPIO_read(PC_13);
 ```
 
+### GPIO_ospeed()
 
+Configures the output slew-rate speed of a GPIO pin.
 
-### GPIO_ospeed\(\)
-
-Configures  output speed of GPIO pin : Low, Mid, Fast, High
-
-```c++
-void GPIO_ospeed(GPIO_TypeDef* Port, int pin, int speed);
+```c
+void GPIO_ospeed(PinName_t pinName, uint32_t speed);
 ```
 
 **Parameters**
 
-* **Port:**  Port Number,  GPIOA~GPIOH
-* **pin**:  pin number (int) 0~15
-* **speed**:   LOW_SPEED(0), MID_SPEED(1), FAST_SPEED(2) , HIGH_SPEED(3)
-
-
+* **pinName**: pin to configure
+* **speed**: `LOW_SPEED` (0x00), `MEDIUM_SPEED` (0x01), `FAST_SPEED` (0x10)
 
 **Example code**
 
-```c++
-GPIO_ospeed(GPIOA, 5, 2);  // 2: FAST_SPEED
+```c
+GPIO_ospeed(PA_5, FAST_SPEED);
 ```
 
+### GPIO_otype()
 
+Configures a GPIO pin's output type: push-pull or open-drain.
 
-### GPIO_otype\(\)
-
-Configures  output type of GPIO pin: Push-Pull / Open-Drain
-
-```c++
-void GPIO_otype(GPIO_TypeDef* Port, int pin, int type);
+```c
+void GPIO_otype(PinName_t pinName, uint32_t type);
 ```
 
 **Parameters**
 
-* **Port:**  Port Number,  GPIOA~GPIOH
-* **pin**:  pin number (int) 0~15
-* **type**:   PUSH_PULL(0), OPEN_DRAIN(1)
-
-
+* **pinName**: pin to configure
+* **type**: `PUSH_PULL` (0) or `OPEN_DRAIN` (1)
 
 **Example code**
 
-```c++
-GPIO_otype(GPIOA, 5, 0);  // 0: Push-Pull
+```c
+GPIO_otype(PA_5, PUSH_PULL);
 ```
 
+### GPIO_pupd()
 
+Configures a GPIO pin's internal pull-up/pull-down resistor.
 
-### GPIO_pupdr\(\)
-
-Configures  Pull-up/Pull-down mode of GPIO pin: No Pull-up, Pull-down/ Pull-up/ Pull-down/ Reserved
-
-```c++
-void GPIO_pupd(GPIO_TypeDef* Port, int pin, int pupd);
+```c
+void GPIO_pupd(PinName_t pinName, uint32_t pupd);
 ```
 
 **Parameters**
 
-* **Port:**  Port Number,  GPIOA~GPIOH
-* **pin**:  pin number (int) 0~15
-* **pupd**:   NO_PUPD(0), PULL_UP(1), PULL_DOWN(2), RESERVED(3)
-
-
+* **pinName**: pin to configure
+* **pupd**: `NO_PUPD` (0x00), `PULL_UP` (0x01), `PULL_DOWN` (0x02)
 
 **Example code**
 
-```c++
-GPIO_pupd(GPIOA, 5, 0);  // 0: No Pull-up, Pull-down
+```c
+GPIO_pupd(PC_13, PULL_UP);
 ```
-
 
 
 
