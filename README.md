@@ -121,7 +121,7 @@ uint32_t GPIO_read(PinName_t pinName);
 #endif
 ```
 
-> **Note:** This is the v2 pin API. Instead of a separate `GPIO_TypeDef* Port` + `int pin` pair, every function takes a single `PinName_t` value (e.g. `PA_5`, `PC_13`) that encodes both the port and pin number. The mapping is resolved internally by `ecPinmap()` (declared in `ecPinNames.h`).
+
 
 ### GPIO_init()
 
