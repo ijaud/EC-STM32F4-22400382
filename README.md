@@ -235,7 +235,513 @@ GPIO_pupd(PC_13, PULL_UP);
 
 ------
 
+## RCC (System / Peripheral Clock)
 
+### Header File
+
+`#include "ecRCC2.h"`
+
+```c
+#include "stm32f4xx.h"
+#include "stm32f411xe.h"
+#include "ecPinNames.h"
+
+#ifndef __EC_RCC2_H
+#define __EC_RCC2_H
+
+#ifdef __cplusplus
+ extern "C" {
+#endif /* __cplusplus */
+
+extern volatile int EC_SYSCLK;		// current SYSCLK [Hz], set by RCC_HSI_init()/RCC_PLL_init()
+
+void delay_ms_HSI(uint32_t ms);
+void RCC_HSI_init(void);
+void RCC_PLL_init(void);
+void RCC_GPIOA_enable(void);
+void RCC_GPIOB_enable(void);
+void RCC_GPIOC_enable(void);
+void RCC_GPIOD_enable(void);
+
+#ifdef __cplusplus
+}
+#endif /* __cplusplus */
+
+#endif
+```
+
+### RCC_HSI_init()
+
+Enables the internal 16 MHz HSI oscillator and selects it as the system clock source. Updates `EC_SYSCLK` to `16000000`.
+
+```c
+void RCC_HSI_init(void);
+```
+
+**Parameters**
+
+* (none)
+
+**Example code**
+
+```c
+RCC_HSI_init();   // SYSCLK = 16 MHz
+```
+
+### RCC_PLL_init()
+
+Configures the PLL to run the system clock at 84 MHz (from the 16 MHz HSI source) and selects PLL as the system clock source. Updates `EC_SYSCLK` to `84000000`. Must be called before `SysTick_init()`, since SysTick's 1 ms reload value depends on `EC_SYSCLK`.
+
+```c
+void RCC_PLL_init(void);
+```
+
+**Parameters**
+
+* (none)
+
+**Example code**
+
+```c
+RCC_PLL_init();   // SYSCLK = 84 MHz
+```
+
+### RCC_GPIOA_enable() / RCC_GPIOB_enable() / RCC_GPIOC_enable() / RCC_GPIOD_enable()
+
+Enables the AHB1 peripheral clock for the corresponding GPIO port. Must be called before configuring or using any pin on that port — this is done automatically inside `GPIO_init()`, so it rarely needs to be called directly.
+
+```c
+void RCC_GPIOA_enable(void);
+void RCC_GPIOB_enable(void);
+void RCC_GPIOC_enable(void);
+void RCC_GPIOD_enable(void);
+```
+
+**Parameters**
+
+* (none)
+
+**Example code**
+
+```c
+RCC_GPIOD_enable();   // enable clock for GPIOD before using a PD_x pin
+```
+
+### delay_ms_HSI()
+
+Busy-wait (blocking) delay in milliseconds, computed directly from `EC_SYSCLK` with a software loop. Does not use SysTick, so it works even before `SysTick_init()` has been called, but is less accurate than `delay_ms()`.
+
+```c
+void delay_ms_HSI(uint32_t ms);
+```
+
+**Parameters**
+
+* **ms**: delay duration in milliseconds
+
+**Example code**
+
+```c
+delay_ms_HSI(500);   // ~500 ms blocking delay
+```
+
+---
+
+## SysTick (1 ms System Timer)
+
+### Header File
+
+`#include "ecSysTick2.h"`
+
+```c
+#include "stm32f4xx.h"
+#include "ecRCC2.h"
+#include <stdint.h>
+
+#ifndef __EC_SYSTICK2_H
+#define __EC_SYSTICK2_H
+
+#ifdef __cplusplus
+ extern "C" {
+#endif /* __cplusplus */
+
+extern volatile uint32_t msTicks;
+
+void SysTick_init(void);
+void SysTick_Handler(void);
+void SysTick_counter(void);
+void delay_ms(uint32_t msec);
+void SysTick_reset(void);
+uint32_t SysTick_val(void);
+
+#ifdef __cplusplus
+}
+#endif /* __cplusplus */
+
+#endif
+```
+
+### SysTick_init()
+
+Configures the SysTick timer to generate an interrupt every 1 ms, based on the current `EC_SYSCLK`. Must be called **after** `RCC_HSI_init()` or `RCC_PLL_init()`, since the reload value depends on the system clock frequency.
+
+```c
+void SysTick_init(void);
+```
+
+**Parameters**
+
+* (none)
+
+**Example code**
+
+```c
+RCC_PLL_init();     // set SYSCLK first
+SysTick_init();      // then start the 1 ms tick
+```
+
+### SysTick_Handler()
+
+The SysTick interrupt handler. Called automatically by the hardware every 1 ms once `SysTick_init()` is active — it is not meant to be called directly from user code. Internally calls `SysTick_counter()`.
+
+```c
+void SysTick_Handler(void);
+```
+
+**Parameters**
+
+* (none, ISR)
+
+### SysTick_counter()
+
+Increments the global millisecond counter `msTicks` by 1. Called internally by `SysTick_Handler()` on every tick.
+
+```c
+void SysTick_counter(void);
+```
+
+**Parameters**
+
+* (none)
+
+### delay_ms()
+
+Blocking delay of `msec` milliseconds, implemented by polling `msTicks` (which `SysTick_Handler()` increments every 1 ms in the background).
+
+```c
+void delay_ms(uint32_t msec);
+```
+
+**Parameters**
+
+* **msec**: delay duration in milliseconds
+
+**Example code**
+
+```c
+delay_ms(1000);   // blocks for 1 second
+```
+
+### SysTick_reset()
+
+Resets the SysTick hardware down-counter (`SysTick->VAL`) to 0. Does not affect `msTicks`.
+
+```c
+void SysTick_reset(void);
+```
+
+**Parameters**
+
+* (none)
+
+### SysTick_val()
+
+Returns the current value of the SysTick hardware down-counter.
+
+```c
+uint32_t SysTick_val(void);
+```
+
+**Parameters**
+
+* (none)
+
+**Example code**
+
+```c
+uint32_t v = SysTick_val();
+```
+
+---
+
+## EXTI (External Interrupt)
+
+### Header File
+
+`#include "ecEXTI2.h"`
+
+```c
+#include "stm32f411xe.h"
+#include "ecPinNames.h"
+
+#ifndef __EC_EXTI2_H
+#define __EC_EXTI2_H
+
+#define FALL 0
+#define RISE 1
+#define BOTH 2
+
+#ifdef __cplusplus
+ extern "C" {
+#endif /* __cplusplus */
+
+void EXTI_init(PinName_t pinName, uint32_t trig_type, uint32_t priority);
+void EXTI_enable(PinName_t pinName);
+void EXTI_disable(PinName_t pinName);
+uint32_t is_pending_EXTI(PinName_t pinName);
+void clear_pending_EXTI(PinName_t pinName);
+
+#ifdef __cplusplus
+}
+#endif /* __cplusplus */
+
+#endif
+```
+
+### EXTI_init()
+
+Configures a pin as an external interrupt source: connects the EXTI line to the pin's port, selects the trigger edge, unmasks (enables) the EXTI line, and enables + sets the priority of the corresponding NVIC interrupt. The EXTI line number is determined by the pin number (not the port) — e.g. `PA_2` and `PD_2` both use EXTI line 2 and share the same handler name.
+
+```c
+void EXTI_init(PinName_t pinName, uint32_t trig_type, uint32_t priority);
+```
+
+**Parameters**
+
+* **pinName**: pin to use as the interrupt source (e.g. `PA_5`, `PC_13`)
+* **trig_type**: `FALL` (0), `RISE` (1), `BOTH` (2)
+* **priority**: NVIC priority level (0 = highest, 15 = lowest)
+
+**Example code**
+
+```c
+EXTI_init(PC_13, FALL, 10);   // interrupt on falling edge of PC_13, priority 10
+```
+
+### EXTI_enable() / EXTI_disable()
+
+Unmasks or masks the EXTI line for the given pin (`EXTI->IMR`), without touching its trigger-edge configuration. Useful for temporarily enabling/disabling an interrupt that was already configured with `EXTI_init()`.
+
+```c
+void EXTI_enable(PinName_t pinName);
+void EXTI_disable(PinName_t pinName);
+```
+
+**Parameters**
+
+* **pinName**: pin whose EXTI line should be enabled/disabled
+
+**Example code**
+
+```c
+EXTI_disable(SW1_JK);   // temporarily ignore SW1 interrupts
+EXTI_enable(SW1_JK);     // re-enable them
+```
+
+### is_pending_EXTI()
+
+Reads the EXTI pending-request register (`EXTI->PR`) for the given pin's line and returns whether an edge event is currently latched. This is a one-shot latch, not a live level read — once set, it stays set until explicitly cleared with `clear_pending_EXTI()`.
+
+```c
+uint32_t is_pending_EXTI(PinName_t pinName);
+```
+
+**Parameters**
+
+* **pinName**: pin whose EXTI line to check
+
+**Returns**: `1` if the line's pending bit is set, `0` otherwise
+
+**Example code**
+
+```c
+if (is_pending_EXTI(SW1_JK)) { ... }
+```
+
+### clear_pending_EXTI()
+
+Clears the EXTI pending-request bit for the given pin's line by writing 1 to it. Must be called inside the corresponding `IRQHandler()` after handling the event — forgetting this causes the ISR to re-trigger immediately (or, in a busy-wait loop checking `is_pending_EXTI()`, causes it to never exit).
+
+```c
+void clear_pending_EXTI(PinName_t pinName);
+```
+
+**Parameters**
+
+* **pinName**: pin whose EXTI pending bit to clear
+
+**Example code**
+
+```c
+void EXTI15_10_IRQHandler(void) {
+    if (is_pending_EXTI(BUTTON_PIN)) {
+        // ... handle event ...
+        clear_pending_EXTI(BUTTON_PIN);
+    }
+}
+```
+
+---
+
+## Stepper Motor (FSM-based)
+
+### Header File
+
+`#include "ecStepper2.h"`
+
+```c
+#include "stm32f411xe.h"
+#include "ecPinNames.h"
+#include "ecRCC2.h"
+#include "ecGPIO2.h"
+#include "ecSysTick2.h"
+
+#ifndef __EC_STEPPER2_H
+#define __EC_STEPPER2_H
+
+#ifdef __cplusplus
+ extern "C" {
+#endif /* __cplusplus */
+
+// Stepper Mode
+#define HALF 0
+#define FULL 1
+#define DIR_CW 0
+#define DIR_CCW 1
+
+// 28BYJ-48 : 64 steps/rev x 1/32 gear = 2048
+#define STEP_PER_REV  (64*32)
+
+typedef enum {
+    S0, S1, S2, S3, S4, S5, S6, S7
+} StateNum;
+
+typedef struct {
+    uint32_t next[2];
+    uint8_t  out[4];
+} StateStepper_t;
+
+void stepper_init(uint32_t mode, PinName_t *pinStepper);
+void stepper_speed(uint32_t speedRPM);
+void stepper_step(uint32_t steps, uint32_t direction);
+void stepper_out(uint32_t state);
+void stepper_stop(void);
+
+#ifdef __cplusplus
+}
+#endif /* __cplusplus */
+
+#endif
+```
+
+### stepper_init()
+
+Selects the FSM state table to use (`fsm_Full` for 4-state full-stepping, `fsm_Half` for 8-state half-stepping) and initializes the 4 coil-driver pins (A, B, A', B') as fast digital outputs. Must be called before any other `stepper_*()` function.
+
+```c
+void stepper_init(uint32_t mode, PinName_t *pinStepper);
+```
+
+**Parameters**
+
+* **mode**: `FULL` (1) or `HALF` (0)
+* **pinStepper**: pointer to a 4-element `PinName_t` array, in order `{A, B, A', B'}`
+
+**Example code**
+
+```c
+PinName_t pinStepper[4] = {PB_10, PB_4, PB_5, PB_3};
+stepper_init(FULL, pinStepper);
+```
+
+### stepper_speed()
+
+Converts a desired speed in rpm into the per-step delay (`_step_delay`, in ms) used by `stepper_step()`. The conversion assumes `STEP_PER_REV` steps make up one revolution (true for full-stepping); using the same `speedRPM` value in half-stepping mode does not keep the real-world rpm the same, since half-stepping needs twice as many steps per revolution.
+
+```c
+void stepper_speed(uint32_t speedRPM);
+```
+
+**Parameters**
+
+* **speedRPM**: desired motor speed in revolutions per minute (integer ≥ 1 — passing `0` causes a divide-by-zero)
+
+**Example code**
+
+```c
+stepper_speed(1);   // 1 rpm
+```
+
+### stepper_step()
+
+Runs the motor for `steps` FSM transitions in the given direction, advancing the FSM state and driving the output pins via `stepper_out()` once per step, with a `_step_delay` ms pause between steps. Does nothing if `stepper_init()` has not been called yet.
+
+```c
+void stepper_step(uint32_t steps, uint32_t direction);
+```
+
+**Parameters**
+
+* **steps**: number of FSM state transitions to run
+* **direction**: `DIR_CW` (0) or `DIR_CCW` (1)
+
+**Example code**
+
+```c
+uint32_t steps = STEP_PER_REV*1;   // 1 revolution, full-stepping
+stepper_step(steps, DIR_CW);
+```
+
+### stepper_out()
+
+Writes the (A, B, A', B') output pattern of the given FSM state to the 4 coil pins. Normally called internally by `stepper_step()`, but can be called directly to force a specific state's output.
+
+```c
+void stepper_out(uint32_t state);
+```
+
+**Parameters**
+
+* **state**: FSM state index (`S0`–`S3` for full-stepping, `S0`–`S7` for half-stepping)
+
+**Example code**
+
+```c
+stepper_out(S0);
+```
+
+### stepper_stop()
+
+Immediately de-energizes all 4 coil pins (drives them `LOW`) and resets the internal step counter. Does not reset the current FSM state, so the next `stepper_step()` call resumes from where it left off.
+
+```c
+void stepper_stop(void);
+```
+
+**Parameters**
+
+* (none)
+
+**Example code**
+
+```c
+void EXTI15_10_IRQHandler(void) {
+    if (is_pending_EXTI(BUTTON_PIN)) {
+        stepper_stop();
+        clear_pending_EXTI(BUTTON_PIN);
+    }
+}
+```
 
 ## Class or Header name
 
