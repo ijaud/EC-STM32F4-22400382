@@ -673,7 +673,7 @@ uint32_t getStepsPerRev(void);
 
 ### stepper_init()
 
-Selects the FSM state table to use (`fsm_Full` for 4-state full-stepping, `fsm_Half` for 8-state half-stepping) and initializes the 4 coil-driver pins (A, B, A', B') as fast digital outputs. Also records how many FSM steps make up one physical revolution in that mode (`STEP_PER_REV` for `FULL`, `STEP_PER_REV*2` for `HALF`) into an internal `_stepsPerRev` variable, which `stepper_speed()` and `getStepsPerRev()` then use — so switching between `FULL` and `HALF` here is enough to keep both the speed calculation and the step count correct, without changing anything else in `main()`. Must be called before any other `stepper_*()` function.
+Selects the FSM state table to use (`fsm_Full` for 4-state full-stepping, `fsm_Half` for 8-state half-stepping) and initializes the 4 coil-driver pins (A, B, A', B') as fast digital outputs. Also records how many FSM steps make up one physical revolution in that mode (`STEP_PER_REV` for `FULL`, `STEP_PER_REV*2` for `HALF`) into an internal `stepsPerRev` variable, which `stepper_speed()` and `getStepsPerRev()` then use — so switching between `FULL` and `HALF` here is enough to keep both the speed calculation and the step count correct, without changing anything else in `main()`. Must be called before any other `stepper_*()` function.
 
 ```c
 void stepper_init(uint32_t mode, PinName_t *pinStepper);
@@ -693,7 +693,7 @@ stepper_init(FULL, pinStepper);
 
 ### stepper_speed()
 
-Converts a desired speed in rpm into the per-step delay (`_step_delay`, in ms) used by `stepper_step()`, using `_stepsPerRev` (set by `stepper_init()`) as the steps-per-revolution count. Because `_stepsPerRev` already reflects the current mode (`FULL` or `HALF`), the same `speedRPM` value produces the correct real-world rpm in either mode — no manual compensation is needed when switching modes.
+Converts a desired speed in rpm into the per-step delay (`_step_delay`, in ms) used by `stepper_step()`, using `stepsPerRev` (set by `stepper_init()`) as the steps-per-revolution count. Because `stepsPerRev` already reflects the current mode (`FULL` or `HALF`), the same `speedRPM` value produces the correct real-world rpm in either mode — no manual compensation is needed when switching modes.
 
 ```c
 void stepper_speed(uint32_t speedRPM);
