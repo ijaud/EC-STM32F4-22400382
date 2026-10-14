@@ -61,6 +61,7 @@ MCU:  STM32F411RE (Nucleo-64)
     + [stepper_step\(\)](#stepper_step)
     + [stepper_out\(\)](#stepper_out)
     + [stepper_stop\(\)](#stepper_stop)
+    + [getStepsPerRev\(\)](#getstepsperrev)
 
 ---
 
@@ -121,7 +122,7 @@ uint32_t GPIO_read(PinName_t pinName);
 #endif
 ```
 
-
+> **Note:** This is the v2 pin API. Instead of a separate `GPIO_TypeDef* Port` + `int pin` pair, every function takes a single `PinName_t` value (e.g. `PA_5`, `PC_13`) that encodes both the port and pin number. The mapping is resolved internally by `ecPinmap()` (declared in `ecPinNames.h`).
 
 ### GPIO_init()
 
@@ -661,6 +662,7 @@ void stepper_speed(uint32_t speedRPM);
 void stepper_step(uint32_t steps, uint32_t direction);
 void stepper_out(uint32_t state);
 void stepper_stop(void);
+uint32_t getStepsPerRev(void);
 
 #ifdef __cplusplus
 }
@@ -671,7 +673,7 @@ void stepper_stop(void);
 
 ### stepper_init()
 
-Selects the FSM state table to use (`fsm_Full` for 4-state full-stepping, `fsm_Half` for 8-state half-stepping) and initializes the 4 coil-driver pins (A, B, A', B') as fast digital outputs. Must be called before any other `stepper_*()` function.
+Selects the FSM state table to use (`fsm_Full` for 4-state full-stepping, `fsm_Half` for 8-state half-stepping) and initializes the 4 coil-driver pins (A, B, A', B') as fast digital outputs. Also records how many FSM steps make up one physical revolution in that mode (`STEP_PER_REV` for `FULL`, `STEP_PER_REV*2` for `HALF`) into an internal `_stepsPerRev` variable, which `stepper_speed()` and `getStepsPerRev()` then use — so switching between `FULL` and `HALF` here is enough to keep both the speed calculation and the step count correct, without changing anything else in `main()`. Must be called before any other `stepper_*()` function.
 
 ```c
 void stepper_init(uint32_t mode, PinName_t *pinStepper);
@@ -691,7 +693,7 @@ stepper_init(FULL, pinStepper);
 
 ### stepper_speed()
 
-Converts a desired speed in rpm into the per-step delay (`_step_delay`, in ms) used by `stepper_step()`. The conversion assumes `STEP_PER_REV` steps make up one revolution (true for full-stepping); using the same `speedRPM` value in half-stepping mode does not keep the real-world rpm the same, since half-stepping needs twice as many steps per revolution.
+Converts a desired speed in rpm into the per-step delay (`_step_delay`, in ms) used by `stepper_step()`, using `_stepsPerRev` (set by `stepper_init()`) as the steps-per-revolution count. Because `_stepsPerRev` already reflects the current mode (`FULL` or `HALF`), the same `speedRPM` value produces the correct real-world rpm in either mode — no manual compensation is needed when switching modes.
 
 ```c
 void stepper_speed(uint32_t speedRPM);
@@ -756,6 +758,31 @@ void stepper_stop(void);
 **Parameters**
 
 * (none)
+
+### getStepsPerRev()
+
+Returns the number of FSM steps needed for one physical revolution in the mode last passed to `stepper_init()` — `STEP_PER_REV` for `FULL`, `STEP_PER_REV*2` for `HALF`. Meant to be used in place of hard-coding `STEP_PER_REV` (or `STEP_PER_REV*2`) when computing a step count for `stepper_step()`, so that `main()` does not need to know which mode is active.
+
+```c
+uint32_t getStepsPerRev(void);
+```
+
+**Parameters**
+
+* (none)
+
+**Returns**: steps required for 1 revolution in the current mode
+
+**Example code**
+
+```c
+stepper_init(HALF, pinStepper);
+stepper_speed(1);   // 1 rpm — correct in either mode, no manual compensation needed
+
+uint32_t rev = 1;
+uint32_t steps = getStepsPerRev()*rev;   // automatically 2048 (FULL) or 4096 (HALF)
+stepper_step(steps, DIR_CW);
+```
 
 **Example code**
 
