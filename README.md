@@ -62,6 +62,21 @@ MCU:  STM32F411RE (Nucleo-64)
     + [stepper_out\(\)](#stepper_out)
     + [stepper_stop\(\)](#stepper_stop)
     + [getStepsPerRev\(\)](#getstepsperrev)
+  * [USART (Serial Communication)](#usart-serial-communication)
+    + [Header File](#header-file-5)
+    + [USART_init\(\)](#usart_init)
+    + [USART_baud\(\)](#usart_baud)
+    + [USART_pins\(\)](#usart_pins)
+    + [USART1_baud\(\) / USART2_baud\(\)](#usart1_baud--usart2_baud)
+    + [USART1_init\(\) / USART2_init\(\)](#usart1_init--usart2_init)
+    + [USART1_write\(\) / USART2_write\(\)](#usart1_write--usart2_write)
+    + [USART1_read\(\) / USART2_read\(\)](#usart1_read--usart2_read)
+    + [is_USART1_RXNE\(\) / is_USART2_RXNE\(\)](#is_usart1_rxne--is_usart2_rxne)
+    + [USART_clock_enable\(\)](#usart_clock_enable)
+    + [USART_write\(\)](#usart_write)
+    + [USART_read\(\)](#usart_read)
+    + [is_USART_RXNE\(\)](#is_usart_rxne)
+    + [USART_delay\(\)](#usart_delay)
 
 ---
 
@@ -793,6 +808,322 @@ void EXTI15_10_IRQHandler(void) {
         clear_pending_EXTI(BUTTON_PIN);
     }
 }
+```
+
+------
+
+## USART (Serial Communication)
+
+### Header File
+
+`#include "ecUSART2.h"`
+
+```c
+#define BAUD_9600	9600
+#define BAUD_38400  38400
+#define BAUD_57600	57600
+#define BAUD_115200 115200
+
+#ifdef __cplusplus
+ extern "C" {
+#endif /* __cplusplus */
+
+void USART_init(USART_TypeDef* USARTx, PinName_t pin_GPIO_TX, PinName_t pin_GPIO_RX, uint32_t baud);
+void USART_baud(USART_TypeDef* USARTx, uint32_t baud);
+void USART_pins(USART_TypeDef* USARTx, PinName_t pin_GPIO_TX, PinName_t pin_GPIO_RX);
+void USART1_baud(uint32_t baud);
+void USART2_baud(uint32_t baud);
+
+void USART1_init(void);
+void USART2_init(void);
+
+void USART1_write(uint8_t* buffer, uint32_t nBytes);
+void USART2_write(uint8_t* buffer, uint32_t nBytes);
+uint8_t USART1_read(void);
+uint8_t USART2_read(void);
+
+uint32_t is_USART1_RXNE(void);
+uint32_t is_USART2_RXNE(void);
+
+void USART_clock_enable(USART_TypeDef* USARTx);
+void USART_write(USART_TypeDef* USARTx, uint8_t* buffer, uint32_t nBytes);
+uint8_t USART_read(USART_TypeDef * USARTx);
+uint32_t is_USART_RXNE(USART_TypeDef * USARTx);
+void USART_delay(uint32_t us);
+
+#ifdef __cplusplus
+}
+#endif /* __cplusplus */
+```
+
+> **Note:** STM32F411 only has **USART1, USART2, USART6** (no USART3/4/5). USART2 is wired through the ST-Link USB on the NUCLEO board (direct PC connection); USART1 and USART6 are free GPIO-based peripherals for general-purpose serial links (MCU-to-MCU, Bluetooth modules, etc.).
+
+### USART_init()
+
+General-purpose USART configuration for **any** of USART1/USART2/USART6: configures the TX/RX GPIO pins (via `USART_pins()`), sets word length/parity/oversampling/stop bits (no parity, 8-bit, oversampling x16, 1 stop bit), sets the baud rate (via `USART_baud()`), enables TX/RX and the USART peripheral, then enables the RXNE (RX-not-empty) interrupt and picks the matching NVIC IRQ number (`USART1_IRQn`/`USART2_IRQn`/`USART6_IRQn`) for whichever `USARTx` was passed in.
+
+```c
+void USART_init(USART_TypeDef* USARTx, PinName_t pin_GPIO_TX, PinName_t pin_GPIO_RX, uint32_t baud);
+```
+
+**Parameters**
+
+* **USARTx**: peripheral base pointer — `USART1`, `USART2`, or `USART6`
+* **pin_GPIO_TX**: TX pin, e.g. `PA_9`
+* **pin_GPIO_RX**: RX pin, e.g. `PA_10`
+* **baud**: baud rate, e.g. `BAUD_9600`
+
+**Example code**
+
+```c
+USART_init(USART1, PA_9, PA_10, BAUD_9600);   // PA9 = TXD, PA10 = RXD
+```
+
+### USART_baud()
+
+Computes and writes the `BRR` (Baud Rate Register) value for the requested baud rate, given the USART peripheral's actual clock (APB2 for USART1/USART6 at 84MHz after `RCC_PLL_init()`, APB1 for USART2 at 42MHz — half the APB2 rate). `USARTDIV = f_CK / (16 * baud)` is split into a Mantissa (`BRR[15:4]`) and a Fraction (`BRR[3:0]`, in 1/16ths), with carry handling in case rounding the fraction overflows into 16.
+
+```c
+void USART_baud(USART_TypeDef* USARTx, uint32_t baud);
+```
+
+**Parameters**
+
+* **USARTx**: peripheral base pointer — `USART1`, `USART2`, or `USART6`
+* **baud**: desired baud rate, e.g. `BAUD_57600`
+
+**Example code**
+
+```c
+USART_baud(USART2, BAUD_57600);
+```
+
+### USART_pins()
+
+Configures the TX and RX GPIO pins for Alternate Function mode (Push-Pull, No Pull-up/down, High speed) and sets each pin's Alternate Function Register (AFR) bits to select the USART function (AF7 for USART1/USART2, AF8 for USART6).
+
+```c
+void USART_pins(USART_TypeDef* USARTx, PinName_t pin_GPIO_TX, PinName_t pin_GPIO_RX);
+```
+
+**Parameters**
+
+* **USARTx**: peripheral base pointer, used only to pick AF7 vs AF8
+* **pin_GPIO_TX**: TX pin
+* **pin_GPIO_RX**: RX pin
+
+**Example code**
+
+```c
+USART_pins(USART1, PA_9, PA_10);
+```
+
+### USART1_baud() / USART2_baud()
+
+Convenience wrappers around `USART_baud()` for USART1 and USART2 specifically — useful for changing the baud rate after `USART1_init()`/`USART2_init()` already ran at their default (9600).
+
+```c
+void USART1_baud(uint32_t baud);
+void USART2_baud(uint32_t baud);
+```
+
+**Parameters**
+
+* **baud**: new baud rate, e.g. `BAUD_38400`
+
+**Example code**
+
+```c
+USART2_init();          // starts at default 9600
+USART2_baud(BAUD_38400); // switch to 38400
+```
+
+### USART1_init() / USART2_init()
+
+Fixed-pin, fixed-default-baud (9600) initialization for USART1 (PA9=TX, PA10=RX) and USART2 (PA2=TX, PA3=RX). Unlike `USART_init()`, these don't take a `USARTx` parameter — each is hardcoded to its own peripheral, pins, and NVIC IRQ, so no IRQ-selection branch is needed internally. USART2's TX/RX are routed through the NUCLEO board's ST-Link, so `USART2_init()` is what connects the MCU to a PC terminal (e.g. TeraTerm) over the USB cable with no extra wiring.
+
+```c
+void USART1_init(void);
+void USART2_init(void);
+```
+
+**Parameters**
+
+* (none)
+
+**Example code**
+
+```c
+USART2_init();   // PC <-> MCU link via ST-Link USB, 9600 baud, RX interrupt enabled
+USART1_init();   // MCU <-> MCU (or MCU <-> Bluetooth module) link via PA9/PA10, 9600 baud
+```
+
+### USART1_write() / USART2_write()
+
+Transmits `nBytes` from `buffer` over USART1 or USART2, polling the TXE (TX-empty) flag before each byte. Thin wrappers around `USART_write()`.
+
+```c
+void USART1_write(uint8_t* buffer, uint32_t nBytes);
+void USART2_write(uint8_t* buffer, uint32_t nBytes);
+```
+
+**Parameters**
+
+* **buffer**: pointer to the bytes to send
+* **nBytes**: number of bytes to send
+
+**Example code**
+
+```c
+uint8_t c = 'H';
+USART1_write(&c, 1);
+```
+
+### USART1_read() / USART2_read()
+
+Blocks until a byte is available (polls `is_USART1_RXNE()`/`is_USART2_RXNE()`) and returns it. Normally called from inside the corresponding `IRQHandler()` right after confirming `is_USARTx_RXNE()` is already set, so the "blocking" wait resolves immediately. Thin wrappers around `USART_read()`.
+
+```c
+uint8_t USART1_read(void);
+uint8_t USART2_read(void);
+```
+
+**Parameters**
+
+* (none)
+
+**Returns**: the received byte
+
+**Example code**
+
+```c
+void USART1_IRQHandler(void){
+    if (is_USART1_RXNE()){
+        uint8_t data = USART1_read();
+    }
+}
+```
+
+### is_USART1_RXNE() / is_USART2_RXNE()
+
+Checks the RXNE (RX-not-empty) flag of USART1/USART2 — `1` if a received byte is waiting in the data register, `0` otherwise. The standard guard at the top of a USART RX interrupt handler, since the same `IRQHandler()` can in principle fire for reasons other than a fresh reception.
+
+```c
+uint32_t is_USART1_RXNE(void);
+uint32_t is_USART2_RXNE(void);
+```
+
+**Parameters**
+
+* (none)
+
+**Returns**: `1` if RXNE is set, `0` otherwise
+
+**Example code**
+
+```c
+void USART2_IRQHandler(void){
+    if (is_USART2_RXNE()){   // only act on a genuinely new byte
+        uint8_t data = USART2_read();
+    }
+}
+```
+
+### USART_clock_enable()
+
+Enables the AHB/APB peripheral clock for the given USART: `RCC_APB2ENR_USART1EN` for USART1, `RCC_APB1ENR_USART2EN` for USART2, `RCC_APB2ENR_USART6EN` for USART6. Called internally by `USART_init()`/`USART1_init()`/`USART2_init()`.
+
+```c
+void USART_clock_enable(USART_TypeDef* USARTx);
+```
+
+**Parameters**
+
+* **USARTx**: peripheral base pointer — `USART1`, `USART2`, or `USART6`
+
+**Example code**
+
+```c
+USART_clock_enable(USART1);
+```
+
+### USART_write()
+
+The general-purpose byte-buffer transmit routine underlying `USART1_write()`/`USART2_write()`: for each byte, waits for the TXE flag, writes it to `DR` (which clears TXE), then waits for the TC (transmission-complete) flag after the whole buffer is sent.
+
+```c
+void USART_write(USART_TypeDef* USARTx, uint8_t* buffer, uint32_t nBytes);
+```
+
+**Parameters**
+
+* **USARTx**: peripheral base pointer
+* **buffer**: pointer to the bytes to send
+* **nBytes**: number of bytes to send
+
+**Example code**
+
+```c
+uint8_t msg[] = "Hello\r\n";
+USART_write(USART2, msg, sizeof(msg));
+```
+
+### USART_read()
+
+The general-purpose single-byte receive routine underlying `USART1_read()`/`USART2_read()`: blocks until `is_USART_RXNE()` is set, then reads `DR` (which clears RXNE).
+
+```c
+uint8_t USART_read(USART_TypeDef * USARTx);
+```
+
+**Parameters**
+
+* **USARTx**: peripheral base pointer
+
+**Returns**: the received byte
+
+**Example code**
+
+```c
+uint8_t data = USART_read(USART1);
+```
+
+### is_USART_RXNE()
+
+The general-purpose RXNE-flag check underlying `is_USART1_RXNE()`/`is_USART2_RXNE()`.
+
+```c
+uint32_t is_USART_RXNE(USART_TypeDef * USARTx);
+```
+
+**Parameters**
+
+* **USARTx**: peripheral base pointer
+
+**Returns**: `1` if RXNE is set, `0` otherwise
+
+**Example code**
+
+```c
+if (is_USART_RXNE(USART2)) { ... }
+```
+
+### USART_delay()
+
+A short busy-wait delay (in microseconds) inserted between bytes inside `USART_write()`, to give the receiving side time to process each byte.
+
+```c
+void USART_delay(uint32_t us);
+```
+
+**Parameters**
+
+* **us**: delay duration in microseconds
+
+**Example code**
+
+```c
+USART_delay(300);
 ```
 
 ------
