@@ -13,9 +13,9 @@ Course:  Embedded Controller
 
 Program: C/C++
 
-IDE/Compiler: Keil uVision 5
+IDE/Compiler: VS Code + PlatformIO
 
-OS: WIn10
+OS: Win10
 
 MCU:  STM32F411RE (Nucleo-64)
 
@@ -95,6 +95,16 @@ MCU:  STM32F411RE (Nucleo-64)
     + [PWM_init_config\(\)](#pwm_init_config)
     + [PWM_mode_config\(\)](#pwm_mode_config)
     + [PWM_pinmap\(\)](#pwm_pinmap)
+  * [Timer Input Capture (ICAP)](#timer-input-capture-icap)
+    + [Header File](#header-file-8)
+    + [ICAP_init\(\)](#icap_init)
+    + [ICAP_ICn_init\(\)](#icap_icn_init)
+    + [ICAP_tick\(\)](#icap_tick)
+    + [ICAP_read\(\)](#icap_read)
+    + [is_CCIF\(\) / clear_CCIF\(\)](#is_ccif--clear_ccif)
+    + [ICAP_filter\(\)](#icap_filter)
+    + [ICAP_ICn_select\(\)](#icap_icn_select)
+    + [ICAP_pinmap\(\)](#icap_pinmap)
 
 ---
 
@@ -1505,6 +1515,218 @@ Internal helper that returns the timer and channel number of a PWM-capable pin (
 
 ```c
 void PWM_pinmap(PinName_t pinName, TIM_TypeDef **TIMx, int *chN);
+```
+
+**Parameters**
+
+* **pinName**: pin name
+* **TIMx** (out): matching timer base pointer
+* **chN** (out): matching channel number
+
+---
+
+## Timer Input Capture (ICAP)
+
+### Header File
+
+`#include "ecICAP2.h"`
+
+```c
+#include "stm32f411xe.h"
+#include "ecRCC2.h"
+#include "ecGPIO2.h"
+#include "ecTIM2.h"
+
+#ifndef __EC_ICAP2_H
+#define __EC_ICAP2_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif /* __cplusplus */
+
+// Edge Type
+#define IC_RISE 0
+#define IC_FALL 1
+#define IC_BOTH 2
+
+// Input Capture Number
+#define IC_1 1
+#define IC_2 2
+#define IC_3 3
+#define IC_4 4
+
+// Input Capture Filter
+#define IC_FILTER_0		0		// no filter, transition sampled at fDTS
+#define IC_FILTER_1		1		// N = 2 samples at fCK_INT
+#define IC_FILTER_2		2		// N = 4 samples at fCK_INT
+#define IC_FILTER_3		3		// N = 8 samples at fCK_INT
+
+// Timer Input Capture Initialization
+void ICAP_init(PinName_t pinName, uint32_t edge_type);
+void ICAP_ICn_init(PinName_t pinName, uint32_t edge_type, uint32_t ICn);
+void ICAP_tick(PinName_t pinName, uint32_t usec);   // CALL THIS LAST
+uint32_t ICAP_read(PinName_t pinName, uint32_t ICn);
+
+// Capture/Compare Interrupt Flag
+uint32_t is_CCIF(TIM_TypeDef *TIMx, uint32_t ICn);
+void clear_CCIF(TIM_TypeDef *TIMx, uint32_t ICn);
+
+// Internal Functions
+void ICAP_pinmap(PinName_t pinName, TIM_TypeDef **TIMx, int *chN);
+void ICAP_filter(TIM_TypeDef *TIMx, uint32_t ICn, uint16_t filterOpt);
+void ICAP_ICn_select(TIM_TypeDef *TIMx, uint32_t TIn, uint32_t ICn);
+
+#ifdef __cplusplus
+}
+#endif /* __cplusplus */
+
+#endif
+```
+
+> **Note:** A single `PinName_t` selects the GPIO pin, the timer and the channel (TIn) through `ICAP_pinmap()`. Call `RCC_PLL_init()` first, since the tick depends on `EC_SYSCLK`. Initialization order matters: `ICAP_init()` → `ICAP_ICn_init()` (if a second edge/channel is needed) → `ICAP_tick()` **last**, because `ICAP_ICn_init()` resets the tick to 1 usec.
+
+**Supported pins (`ICAP_pinmap()`)**
+
+| Timer | CH1 | CH2 | CH3 | CH4 | AF |
+| --- | --- | --- | --- | --- | --- |
+| TIM1 | PA8 | PA9 | PA10 | – | AF1 |
+| TIM2 | PA0, PA5, PA15 | PA1, PB3 | PB10 | – | AF1 |
+| TIM3 | PA6, PB4, PC6 | PB5, PC7 | PC8 | PC9 | AF2 |
+| TIM4 | PB6 | PB7 | PB8 | PB9 | AF2 |
+
+### ICAP_init()
+
+Initializes a pin as an input capture channel with the default setting **TIn = ICn** (e.g. `PB_6` = TIM4_CH1 = IC1) and a 1 usec tick. Internally calls `ICAP_ICn_init()` with the channel found by `ICAP_pinmap()`.
+
+```c
+void ICAP_init(PinName_t pinName, uint32_t edge_type);
+```
+
+**Parameters**
+
+* **pinName**: input capture pin, e.g. `PB_6`
+* **edge_type**: `IC_RISE` (0), `IC_FALL` (1), `IC_BOTH` (2)
+
+**Example code**
+
+```c
+ICAP_init(PB_6, IC_RISE);    // TIM4_CH1 = IC1, capture on rising edge
+```
+
+### ICAP_ICn_init()
+
+Configures one input capture channel `ICn` for the pin: sets the pin to Alternate Function (no pull, high speed) with the AFR bits of the timer, starts the timer with its update interrupt, maps the input TIn to `ICn` (`CCMRx.CCnS`), sets the input filter (`IC_FILTER_3`, N = 8), selects the active edge (`CCER.CCnP/CCnNP`), enables the capture (`CCER.CCnE`), enables the capture/compare interrupt (`DIER.CCnIE`) and the update interrupt (`DIER.UIE`), and starts the counter.
+
+If `ICn` is different from the pin's own channel, the same pin is connected to another IC (`CCnS = 10`). This allows measuring a pulse width with **one pin**: IC1 for the rising edge and IC2 for the falling edge.
+
+```c
+void ICAP_ICn_init(PinName_t pinName, uint32_t edge_type, uint32_t ICn);
+```
+
+**Parameters**
+
+* **pinName**: input capture pin
+* **edge_type**: `IC_RISE`, `IC_FALL`, `IC_BOTH`
+* **ICn**: input capture number, `IC_1` ~ `IC_4`
+
+**Example code**
+
+```c
+ICAP_init(PB_6, IC_RISE);                // IC1 : rising edge
+ICAP_ICn_init(PB_6, IC_FALL, IC_2);      // IC2 : falling edge of the same pin
+```
+
+### ICAP_tick()
+
+Sets the counter tick (time of one count) in usec by changing the prescaler: `PSC = usec * EC_SYSCLK / 1,000,000 - 1`. ARR is set to its maximum (`0xFFFF`, or `0xFFFFFFFF` for TIM2/TIM5) and an update event is generated so that the new PSC takes effect. **Call this last**, after all `ICAP_init()` / `ICAP_ICn_init()` calls. `PSC` is 16-bit, so the usable range is 1 ~ about 780 usec at 84 MHz.
+
+```c
+void ICAP_tick(PinName_t pinName, uint32_t usec);
+```
+
+**Parameters**
+
+* **pinName**: input capture pin (selects the timer)
+* **usec**: one tick in usec (0 is raised to 1)
+
+**Example code**
+
+```c
+ICAP_tick(PB_6, 10);     // 1 count = 10 usec (0.1 MHz), counter wraps every 65536 x 10 usec = 655 msec
+```
+
+### ICAP_read()
+
+Returns the captured counter value (`TIMx->CCRn`) of channel `ICn`. Reading `CCRn` also clears the `CCnIF` flag.
+
+```c
+uint32_t ICAP_read(PinName_t pinName, uint32_t ICn);
+```
+
+**Parameters**
+
+* **pinName**: input capture pin (selects the timer)
+* **ICn**: `IC_1` ~ `IC_4`
+
+**Returns**: captured counter value (in ticks)
+
+**Example code**
+
+```c
+cap_prev = ICAP_read(PB_6, IC_1);
+```
+
+### is_CCIF() / clear_CCIF()
+
+`is_CCIF()` returns the capture/compare interrupt flag `SR.CCnIF` of channel `ICn`; `clear_CCIF()` clears it. Inside a timer ISR, use it to find out which channel caused the interrupt.
+
+```c
+uint32_t is_CCIF(TIM_TypeDef *TIMx, uint32_t ICn);
+void clear_CCIF(TIM_TypeDef *TIMx, uint32_t ICn);
+```
+
+**Parameters**
+
+* **TIMx**: timer base pointer
+* **ICn**: `IC_1` ~ `IC_4`
+
+**Returns** (`is_CCIF`): non-zero if a capture occurred, `0` otherwise
+
+**Example code**
+
+```c
+void TIM4_IRQHandler(void){
+    if(is_UIF(TIM4)){ ovf_cnt++; clear_UIF(TIM4); }       // counter overflow
+    if(is_CCIF(TIM4, IC_1)){ cap_prev = ICAP_read(PB_6, IC_1); ovf_cnt = 0; }   // rising edge
+    if(is_CCIF(TIM4, IC_2)){                                                    // falling edge
+        cap_curr = ICAP_read(PB_6, IC_2);
+        counts = (cap_curr - cap_prev) + ovf_cnt * 65536;     // pulse width in ticks
+    }
+}
+```
+
+### ICAP_filter()
+
+Internal helper that sets the input capture filter (`CCMRx.ICnF`) of one channel only, so that output channels of the same timer are not disturbed. `IC_FILTER_0` = no filter, `IC_FILTER_1/2/3` = N = 2/4/8 samples at fCK_INT.
+
+```c
+void ICAP_filter(TIM_TypeDef *TIMx, uint32_t ICn, uint16_t filterOpt);
+```
+
+### ICAP_ICn_select()
+
+Internal helper that connects the timer input `TIn` to the capture channel `ICn` (`CCMRx.CCnS`): `01` if `ICn == TIn` (direct), `10` if different (indirect).
+
+```c
+void ICAP_ICn_select(TIM_TypeDef *TIMx, uint32_t TIn, uint32_t ICn);
+```
+
+### ICAP_pinmap()
+
+Internal helper that returns the timer and channel number (TIn) of an input capture pin (see the pin table above). Pins not in the table leave the outputs unchanged.
+
+```c
+void ICAP_pinmap(PinName_t pinName, TIM_TypeDef **TIMx, int *chN);
 ```
 
 **Parameters**
