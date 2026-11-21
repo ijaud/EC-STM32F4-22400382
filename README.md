@@ -105,6 +105,41 @@ MCU:  STM32F411RE (Nucleo-64)
     + [ICAP_filter\(\)](#icap_filter)
     + [ICAP_ICn_select\(\)](#icap_icn_select)
     + [ICAP_pinmap\(\)](#icap_pinmap)
+  * [ADC (Analog-to-Digital Converter)](#adc-analog-to-digital-converter)
+    + [Header File](#header-file-9)
+    + [ADC_init\(\)](#adc_init)
+    + [ADC_read_poll\(\)](#adc_read_poll)
+    + [ADC_read\(\)](#adc_read)
+    + [ADC_trigger_init\(\)](#adc_trigger_init)
+    + [JADC_init\(\)](#jadc_init)
+    + [JADC_read_poll\(\)](#jadc_read_poll)
+    + [JADC_read\(\)](#jadc_read)
+    + [JADC_trigger_init\(\)](#jadc_trigger_init)
+    + [ADC_EOC_enable\(\) / ADC_EOC_disable\(\)](#adc_eoc_enable--adc_eoc_disable)
+    + [ADC_start\(\) / ADC_stop\(\)](#adc_start--adc_stop)
+    + [ADC_sequence\(\)](#adc_sequence)
+    + [ADC_conversion\(\)](#adc_conversion)
+    + [is_ADC_EOC\(\) / clear_ADC_EOC\(\)](#is_adc_eoc--clear_adc_eoc)
+    + [is_ADC_OVR\(\) / clear_ADC_OVR\(\)](#is_adc_ovr--clear_adc_ovr)
+    + [JADC_JEOC_enable\(\) / JADC_JEOC_disable\(\)](#jadc_jeoc_enable--jadc_jeoc_disable)
+    + [JADC_start\(\)](#jadc_start)
+    + [JADC_sequence\(\)](#jadc_sequence)
+    + [is_ADC_JEOC\(\) / clear_ADC_JEOC\(\)](#is_adc_jeoc--clear_adc_jeoc)
+    + [ADC_pinmap\(\)](#adc_pinmap)
+  * [DHT11 (Temperature / Humidity Sensor)](#dht11-temperature--humidity-sensor)
+    + [Header File](#header-file-10)
+    + [DHT11_init\(\)](#dht11_init)
+    + [DHT11_read\(\)](#dht11_read)
+    + [DHT11_temperature\(\) / DHT11_humidity\(\)](#dht11_temperature--dht11_humidity)
+  * [I2C and I2C LCD](#i2c-and-i2c-lcd)
+    + [Header File](#header-file-11)
+    + [I2C1_init\(\) / I2C2_init\(\) / I2C3_init\(\)](#i2c1_init--i2c2_init--i2c3_init)
+    + [I2C1_write\(\) / I2C2_write\(\) / I2C3_write\(\)](#i2c1_write--i2c2_write--i2c3_write)
+    + [I2C1_read\(\) / I2C2_read\(\) / I2C3_read\(\)](#i2c1_read--i2c2_read--i2c3_read)
+    + [LCD_init\(\)](#lcd_init)
+    + [LCD_command\(\) / LCD_data\(\)](#lcd_command--lcd_data)
+    + [LCD_setCursor\(\)](#lcd_setcursor)
+    + [LCD_print\(\)](#lcd_print)
 
 ---
 
@@ -597,6 +632,14 @@ void EXTI_init(PinName_t pinName, uint32_t trig_type, uint32_t priority);
 EXTI_init(PC_13, FALL, 10);   // interrupt on falling edge of PC_13, priority 10
 ```
 
+> **Note: handler name by EXTI line.** The handler is chosen by the pin **number**, and lines 5 ~ 9 and 10 ~ 15 share one handler. Inside a shared handler, check `is_pending_EXTI()` to find the pin that caused it. A wrong handler name compiles without error, but the interrupt falls into `Default_Handler` and the board appears to freeze.
+>
+> | EXTI line (pin number) | Handler |
+> | --- | --- |
+> | 0 ~ 4 | `EXTI0_IRQHandler` ~ `EXTI4_IRQHandler` |
+> | 5 ~ 9 | `EXTI9_5_IRQHandler` |
+> | 10 ~ 15 | `EXTI15_10_IRQHandler` (e.g. `PC_13` = B1) |
+
 ### EXTI_enable() / EXTI_disable()
 
 Unmasks or masks the EXTI line for the given pin (`EXTI->IMR`), without touching its trigger-edge configuration. Useful for temporarily enabling/disabling an interrupt that was already configured with `EXTI_init()`.
@@ -848,9 +891,11 @@ void EXTI15_10_IRQHandler(void) {
 
 ```c
 #define BAUD_9600	9600
+#define BAUD_19200	19200
 #define BAUD_38400  38400
 #define BAUD_57600	57600
 #define BAUD_115200 115200
+#define BAUD_921600 921600
 
 #ifdef __cplusplus
  extern "C" {
@@ -906,6 +951,12 @@ void USART_init(USART_TypeDef* USARTx, PinName_t pin_GPIO_TX, PinName_t pin_GPIO
 ```c
 USART_init(USART1, PA_9, PA_10, BAUD_9600);   // PA9 = TXD, PA10 = RXD
 ```
+
+```c
+USART_init(USART6, PA_11, PA_12, BAUD_9600);  // Bluetooth module : PA11 = TXD, PA12 = RXD (AF8)
+```
+
+> **Note:** `USART_init()` (and `USART1_init()` / `USART2_init()`) enable the **RXNE interrupt**. The matching `USARTx_IRQHandler()` must read `DR` (with `USART_read()`) every time, even if the byte is not used; otherwise RXNE never clears and the ISR re-enters forever. The RX pin is configured without pull-up; if the RX line can be left unconnected (e.g. a Bluetooth module that is unplugged), add `GPIO_pupd(rx_pin, PULL_UP)` **after** `USART_init()` so that noise is not read as data.
 
 ### USART_baud()
 
@@ -1095,6 +1146,8 @@ void USART_write(USART_TypeDef* USARTx, uint8_t* buffer, uint32_t nBytes);
 uint8_t msg[] = "Hello\r\n";
 USART_write(USART2, msg, sizeof(msg));
 ```
+
+> **Note:** `USART_write()` is **blocking**: it waits for TXE before every byte, adds `USART_delay()`, and waits for TC at the end. At 9600 baud one byte takes about 1 ms, so a 30-character message blocks for about 30 ms. Do not call it (or `printf`) inside an interrupt handler.
 
 ### USART_read()
 
@@ -1286,6 +1339,19 @@ void TIM3_IRQHandler(void){
 }
 ```
 
+> **Note: handler names.** Most timers use `TIMx_IRQHandler()`, but **TIM1 has no `TIM1_IRQHandler`**: its update interrupt is `TIM1_UP_TIM10_IRQHandler()` (shared with TIM10). Likewise TIM9 uses `TIM1_BRK_TIM9_IRQHandler()` and TIM11 uses `TIM1_TRG_COM_TIM11_IRQHandler()`. `get_TIM_IRQn()` shows which IRQ each timer uses; the handler name is the IRQ name with `_IRQn` replaced by `_IRQHandler`.
+>
+> ```c
+> TIM_UI_init(TIM1, 500);                  // 500 msec control tick
+>
+> void TIM1_UP_TIM10_IRQHandler(void){
+>     if(is_UIF(TIM1)){
+>         flag_tick = 1;                   // only set a flag, do the work in main()
+>         clear_UIF(TIM1);
+>     }
+> }
+> ```
+
 ### TIM_UI_enable() / TIM_UI_disable()
 
 Enables/disables the update interrupt (`DIER.UIE`) of a timer. `TIM_UI_enable()` first clears any stale UIF flag so that no old event fires immediately.
@@ -1440,6 +1506,16 @@ PWM_init(PA_1, 20);          // 20 msec period (50 Hz) on TIM2_CH2 : RC servo
 PWM_init(PA_0, 1);           // 1 msec period (1 kHz)  on TIM2_CH1 : DC motor
 PWM_init_us(PA_6, 50);       // 50 usec period (20 kHz) on TIM3_CH1
 ```
+
+> **Note:** The counter starts with a **50 % duty** right after `PWM_init()`. For a motor, fan, LED or servo that must start OFF/closed, write the safe value immediately after the init:
+>
+> ```c
+> PWM_init(PA_15, 1);                      // fan, 1 kHz
+> PWM_duty(PA_15, 0.0f);                   // start OFF
+>
+> PWM_init(PC_7, 20);                      // servo, 50 Hz
+> PWM_pulsewidth_us(PC_7, 1400);           // start at the closed position
+> ```
 
 ### PWM_duty()
 
@@ -1734,3 +1810,618 @@ void ICAP_pinmap(PinName_t pinName, TIM_TypeDef **TIMx, int *chN);
 * **pinName**: pin name
 * **TIMx** (out): matching timer base pointer
 * **chN** (out): matching channel number
+
+---
+
+## ADC (Analog-to-Digital Converter)
+
+### Header File
+
+`#include "ecADC2.h"`
+
+```c
+#include <stdint.h>
+#include "stm32f411xe.h"
+#include "ecPinNames.h"
+#include "ecRCC2.h"
+#include "ecGPIO2.h"
+#include "ecTIM2.h"
+
+#ifndef __EC_ADC2_H
+#define __EC_ADC2_H
+
+#ifdef __cplusplus
+ extern "C" {
+#endif /* __cplusplus */
+
+// Trigger edge for ADC_trigger_init() / JADC_trigger_init()
+#define ADC_RISE		1
+#define ADC_FALL		2
+#define ADC_BOTH		3
+
+// Repetition for ADC_conversion()
+#define ADC_SINGLE		0		// one conversion per trigger
+#define ADC_CONT		1		// keep converting after the first trigger
+
+// Regular group
+void ADC_init(PinName_t pinName);
+uint32_t ADC_read_poll(void);
+uint32_t ADC_read(void);
+int ADC_trigger_init(TIM_TypeDef *TIMx, uint32_t msec, uint32_t edge);
+
+// Injected group (JADC)
+void JADC_init(PinName_t pinName);
+uint32_t JADC_read_poll(void);
+uint32_t JADC_read(uint32_t JDRn);
+int JADC_trigger_init(TIM_TypeDef *TIMx, uint32_t msec, uint32_t edge);
+
+// Interrupt, SW start, multi-channel configuration
+void ADC_EOC_enable(void);
+void ADC_EOC_disable(void);
+void ADC_start(void);
+void ADC_stop(void);
+void ADC_sequence(PinName_t *seqCHn, uint32_t seqCHnums);
+void ADC_conversion(uint32_t convMode);
+uint32_t is_ADC_EOC(void);
+void clear_ADC_EOC(void);
+uint32_t is_ADC_OVR(void);
+void clear_ADC_OVR(void);
+
+void JADC_JEOC_enable(void);
+void JADC_JEOC_disable(void);
+void JADC_start(void);
+void JADC_sequence(PinName_t *seqCHn, uint32_t seqCHnums);
+uint32_t is_ADC_JEOC(void);
+void clear_ADC_JEOC(void);
+
+// Internal
+void ADC_pinmap(PinName_t pinName, uint32_t *chN);
+
+#ifdef __cplusplus
+}
+#endif /* __cplusplus */
+
+#endif
+```
+
+> **Note:** Only **ADC1** is used. The ADC clock is PCLK2 / 2 = 42 MHz, the resolution is 12-bit (0 ~ 4095), and every channel is sampled for 84 ADC cycles (2 usec). The **regular group** converts one sequence and puts each result in `DR`; the **injected group (JADC)** converts up to 4 channels and keeps each result in its own register `JDR1` ~ `JDR4`. Both groups share **one interrupt**, `ADC_IRQHandler()`, so check `is_ADC_EOC()` / `is_ADC_JEOC()` inside it.
+
+**Supported pins (`ADC_pinmap()`)**
+
+| Pin | PA0 | PA1 | PA4 | PA5 | PA6 | PA7 | PB0 | PB1 | PC0 | PC1 | PC2 | PC3 | PC4 | PC5 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Channel | 0 | 1 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 |
+
+### ADC_init()
+
+Initializes a pin as an analog input for the **regular group**: sets the pin to `ANALOG` with no pull-up/down, enables the ADC1 clock, sets the prescaler (PCLK2/2), 12-bit resolution and 84-cycle sampling time, puts the channel as the only conversion of the sequence, sets EOC after every conversion (`EOCS = 1`), and enables the ADC. The default is software trigger, single conversion, no interrupt.
+
+```c
+void ADC_init(PinName_t pinName);
+```
+
+**Parameters**
+
+* **pinName**: analog input pin (see the pin table above)
+
+**Example code**
+
+```c
+ADC_init(PB_0);              // ADC1 channel 8
+```
+
+### ADC_read_poll()
+
+Starts one software-triggered conversion, waits for EOC, and returns the result. For the software-trigger mode only (without `ADC_trigger_init()`).
+
+```c
+uint32_t ADC_read_poll(void);
+```
+
+**Returns**: conversion result, 0 ~ 4095
+
+**Example code**
+
+```c
+ADC_init(PB_0);
+uint32_t value = ADC_read_poll();
+```
+
+### ADC_read()
+
+Returns the regular-group result in `DR`. Reading `DR` also clears EOC. Use it inside `ADC_IRQHandler()` after `is_ADC_EOC()`.
+
+```c
+uint32_t ADC_read(void);
+```
+
+**Returns**: conversion result, 0 ~ 4095
+
+### ADC_trigger_init()
+
+Starts the regular-group conversion from a **timer update event (TRGO)** every `msec`, and enables the EOC interrupt. On the F411 only **TIM2** (`EXTSEL = 0110`) and **TIM3** (`EXTSEL = 1000`) can trigger the regular group. The timer is configured with `TIM_init()` and `CR2.MMS = 010` (update event as TRGO).
+
+```c
+int ADC_trigger_init(TIM_TypeDef *TIMx, uint32_t msec, uint32_t edge);
+```
+
+**Parameters**
+
+* **TIMx**: `TIM2` or `TIM3`
+* **msec**: conversion period
+* **edge**: `ADC_RISE`, `ADC_FALL`, `ADC_BOTH`
+
+**Returns**: `0` on success, `-1` if `TIMx` cannot trigger the regular group
+
+**Example code**
+
+```c
+ADC_init(PB_0);
+ADC_trigger_init(TIM3, 1, ADC_RISE);     // convert every 1 msec
+
+void ADC_IRQHandler(void){
+    if(is_ADC_OVR()) clear_ADC_OVR();
+    if(is_ADC_EOC()){
+        value = ADC_read();              // reading DR clears EOC
+    }
+}
+```
+
+### JADC_init()
+
+Initializes a pin as an analog input for the **injected group**: sets the pin to `ANALOG`, enables ADC1, sets 12-bit right alignment and 84-cycle sampling, and builds a one-channel injected sequence. The injected sequence is **right-aligned**: with `JL = 0` the channel is written to `JSQ4`, and its result lands in `JDR1`. The default is software trigger, no interrupt.
+
+```c
+void JADC_init(PinName_t pinName);
+```
+
+**Parameters**
+
+* **pinName**: analog input pin
+
+**Example code**
+
+```c
+JADC_init(PA_0);
+```
+
+### JADC_read_poll()
+
+Starts one software-triggered injected conversion (`JSWSTART`), waits for JEOC, reads `JDR1`, and clears JEOC.
+
+```c
+uint32_t JADC_read_poll(void);
+```
+
+**Returns**: conversion result of the first injected conversion, 0 ~ 4095
+
+### JADC_read()
+
+Returns the result of the n-th conversion of the injected sequence. **Reading `JDRx` does NOT clear JEOC** (unlike `DR`/EOC), so call `clear_ADC_JEOC()` yourself.
+
+```c
+uint32_t JADC_read(uint32_t JDRn);
+```
+
+**Parameters**
+
+* **JDRn**: **index** of the injected result register, 1 ~ 4 (not a pin name)
+
+**Returns**: conversion result, 0 ~ 4095 (`0` for an invalid index)
+
+**Example code**
+
+```c
+light = JADC_read(1);        // JDR1
+moist = JADC_read(2);        // JDR2
+```
+
+### JADC_trigger_init()
+
+Starts the injected-group conversion from a **timer update event (TRGO)** every `msec`, and enables the JEOC interrupt. The timer is configured with `TIM_init()` and `CR2.MMS = 010`.
+
+| TIMx | JEXTSEL |
+| --- | --- |
+| TIM1 TRGO | 0001 |
+| TIM2 TRGO | 0011 |
+| TIM4 TRGO | 1001 |
+| TIM5 TRGO | 1011 |
+
+```c
+int JADC_trigger_init(TIM_TypeDef *TIMx, uint32_t msec, uint32_t edge);
+```
+
+**Parameters**
+
+* **TIMx**: `TIM1`, `TIM2`, `TIM4` or `TIM5`
+* **msec**: conversion period
+* **edge**: `ADC_RISE`, `ADC_FALL`, `ADC_BOTH`
+
+**Returns**: `0` on success, `-1` if `TIMx` cannot trigger the injected group
+
+**Example code** (two channels, TIM5 every 125 msec)
+
+```c
+JADC_init(PA_0);
+JADC_init(PA_1);
+PinName_t jseq[2] = {PA_0, PA_1};        // [0] -> JDR1, [1] -> JDR2
+JADC_sequence(jseq, 2);                  // AFTER all JADC_init() calls
+JADC_trigger_init(TIM5, 125, ADC_RISE);  // LAST
+
+void ADC_IRQHandler(void){
+    if(is_ADC_JEOC()){
+        light = JADC_read(1);
+        moist = JADC_read(2);
+        clear_ADC_JEOC();                // must clear, or the ISR re-enters forever
+    }
+}
+```
+
+> **Note:** Initialization order matters: every `JADC_init()` resets the injected sequence to one channel, so call `JADC_sequence()` **after** all `JADC_init()` calls, and `JADC_trigger_init()` last.
+
+### ADC_EOC_enable() / ADC_EOC_disable()
+
+Enables/disables the EOC interrupt (`CR1.EOCIE`) and the NVIC `ADC_IRQn` (priority 2). `ADC_EOC_enable()` clears the status register first so that a stale flag does not enter the ISR.
+
+```c
+void ADC_EOC_enable(void);
+void ADC_EOC_disable(void);
+```
+
+### ADC_start() / ADC_stop()
+
+`ADC_start()` clears a latched OVR, sets `ADON` and starts a regular conversion by software (`SWSTART`). `ADC_stop()` clears `ADON`, which also stops timer-triggered conversions.
+
+```c
+void ADC_start(void);
+void ADC_stop(void);
+```
+
+### ADC_sequence()
+
+Builds a multi-channel **regular** sequence: sets `SCAN` mode (when more than 1 channel), the sequence length `L`, and the channels in `SQR3` / `SQR2` / `SQR1` in the given order.
+
+```c
+void ADC_sequence(PinName_t *seqCHn, uint32_t seqCHnums);
+```
+
+**Parameters**
+
+* **seqCHn**: array of analog pins in conversion order
+* **seqCHnums**: number of channels (1 ~ 16)
+
+### ADC_conversion()
+
+Selects single or continuous conversion for the regular group (`CR2.CONT`).
+
+```c
+void ADC_conversion(uint32_t convMode);
+```
+
+**Parameters**
+
+* **convMode**: `ADC_SINGLE` (0) or `ADC_CONT` (1)
+
+### is_ADC_EOC() / clear_ADC_EOC()
+
+Returns / clears the regular-group end-of-conversion flag (`SR.EOC`).
+
+```c
+uint32_t is_ADC_EOC(void);
+void clear_ADC_EOC(void);
+```
+
+### is_ADC_OVR() / clear_ADC_OVR()
+
+Returns / clears the overrun flag (`SR.OVR`). OVR is set when a conversion finishes before the previous result was read; while it is set the ADC stays silent, so it must be cleared.
+
+```c
+uint32_t is_ADC_OVR(void);
+void clear_ADC_OVR(void);
+```
+
+### JADC_JEOC_enable() / JADC_JEOC_disable()
+
+Enables/disables the JEOC interrupt (`CR1.JEOCIE`) and the NVIC `ADC_IRQn`. Because `ADC_IRQn` is shared with the regular group, `JADC_JEOC_disable()` turns off the NVIC line only when the EOC interrupt is also off.
+
+```c
+void JADC_JEOC_enable(void);
+void JADC_JEOC_disable(void);
+```
+
+### JADC_start()
+
+Sets `ADON` and starts an injected conversion by software (`JSWSTART`). Not needed with `JADC_trigger_init()`.
+
+```c
+void JADC_start(void);
+```
+
+### JADC_sequence()
+
+Builds a multi-channel **injected** sequence of 1 ~ 4 channels. The sequence is right-aligned in `JSQR`; conversion `i` lands in `JDR(i+1)`.
+
+```c
+void JADC_sequence(PinName_t *seqCHn, uint32_t seqCHnums);
+```
+
+**Parameters**
+
+* **seqCHn**: array of analog pins in conversion order
+* **seqCHnums**: number of channels (1 ~ 4)
+
+### is_ADC_JEOC() / clear_ADC_JEOC()
+
+Returns / clears the injected end-of-conversion flag (`SR.JEOC`). JEOC is cleared **by software only**.
+
+```c
+uint32_t is_ADC_JEOC(void);
+void clear_ADC_JEOC(void);
+```
+
+### ADC_pinmap()
+
+Internal helper that returns the ADC1 channel number of an analog pin (see the pin table above).
+
+```c
+void ADC_pinmap(PinName_t pinName, uint32_t *chN);
+```
+
+---
+
+## DHT11 (Temperature / Humidity Sensor)
+
+### Header File
+
+`#include "ecDHT11.h"`
+
+```c
+#include "stm32f411xe.h"
+#include "ecGPIO2.h"
+#include "ecRCC2.h"
+#include "ecSysTick2.h"
+
+#ifndef __EC_DHT11_H
+#define __EC_DHT11_H
+
+// Return codes of DHT11_read()
+#define DHT11_OK			 0
+#define DHT11_ERR_TOOSOON	-1		// called again before DHT11_MIN_PERIOD_MS
+#define DHT11_ERR_NO_REPLY	-2		// the sensor never answered the start pulse
+#define DHT11_ERR_TIMEOUT	-3		// a bit edge did not arrive in time
+#define DHT11_ERR_CHECKSUM	-4		// 40 bits arrived but the checksum is wrong
+
+#define DHT11_MIN_PERIOD_MS	2000	// datasheet minimum between two reads
+
+void DHT11_init(PinName_t pinName);
+int  DHT11_read(void);
+int  DHT11_temperature(void);		// degC
+int  DHT11_humidity(void);			// %RH
+
+#endif
+```
+
+> **Note:** The DHT11 uses a single open-drain data line with an external pull-up. One transaction is about 22 ~ 25 ms: an 18 ms start pulse (interrupts on) and a 3 ~ 5 ms data phase in which **interrupts are disabled**. The microsecond timing reads `SysTick->VAL` directly, so `RCC_PLL_init()` and `SysTick_init()` must be called first. **Never call `DHT11_read()` inside an interrupt handler**; set a flag in a timer ISR and read in `main()`.
+
+### DHT11_init()
+
+Sets the data pin to input with pull-up (idle high) and resets the read history.
+
+```c
+void DHT11_init(PinName_t pinName);
+```
+
+**Parameters**
+
+* **pinName**: data pin, any plain GPIO pin (e.g. `PA_6`)
+
+**Example code**
+
+```c
+DHT11_init(PA_6);
+```
+
+### DHT11_read()
+
+Runs one 40-bit transaction: sends the start pulse, waits for the sensor's answer, samples 40 bits (each bit is sampled 40 usec after its rising edge), and checks the checksum. On success the values returned by `DHT11_temperature()` / `DHT11_humidity()` are updated; on failure they keep the last valid values.
+
+```c
+int DHT11_read(void);
+```
+
+**Returns**
+
+| Code | Value | Meaning |
+| --- | --- | --- |
+| `DHT11_OK` | 0 | Valid reading |
+| `DHT11_ERR_TOOSOON` | -1 | Called less than 2 s after the previous read (not a sensor fault) |
+| `DHT11_ERR_NO_REPLY` | -2 | No answer to the start pulse (wiring, power, pull-up) |
+| `DHT11_ERR_TIMEOUT` | -3 | A bit edge did not arrive in time |
+| `DHT11_ERR_CHECKSUM` | -4 | Data corrupted |
+
+> **Note:** The 2 s minimum is measured from the **end** of the previous read (about 25 ms after it started), and `msTicks` does not count while interrupts are off. Calling it with an exact 2 s timer period therefore returns `DHT11_ERR_TOOSOON` on every other call; use a period slightly longer than 2 s (e.g. 2.5 s).
+
+**Example code**
+
+```c
+// TIM1 ISR (500 ms) sets flag_dht every 5 ticks = 2.5 s
+if(flag_dht){
+    flag_dht = 0;
+    int err = DHT11_read();
+    if(err == DHT11_OK)
+        printf("T = %d C, RH = %d %%\r\n", DHT11_temperature(), DHT11_humidity());
+    else
+        printf("DHT11 error = %d\r\n", err);
+}
+```
+
+### DHT11_temperature() / DHT11_humidity()
+
+Return the temperature (degC) and the relative humidity (%) of the **last successful** read. A failed read leaves them unchanged.
+
+```c
+int DHT11_temperature(void);
+int DHT11_humidity(void);
+```
+
+**Returns**: integer temperature [degC] / humidity [%RH]
+
+---
+
+## I2C and I2C LCD
+
+### Header File
+
+`#include "ecI2C2.h"`
+
+```c
+// I2C bus
+void I2C1_init(void);                                       // PB_8 = SCL, PB_9 = SDA
+int  I2C1_write(uint8_t devAddr, uint8_t data);
+int  I2C1_read(uint8_t devAddr, uint8_t *buf, uint32_t len);
+
+void I2C2_init(void);                                       // PB_10 = SCL, PB_3 = SDA (AF9)
+int  I2C2_write(uint8_t devAddr, uint8_t data);
+int  I2C2_read(uint8_t devAddr, uint8_t *buf, uint32_t len);
+
+void I2C3_init(void);                                       // PA_8 = SCL, PC_9 = SDA
+int  I2C3_write(uint8_t devAddr, uint8_t data);
+int  I2C3_read(uint8_t devAddr, uint8_t *buf, uint32_t len);
+
+// I2C LCD (16x2, PCF8574 backpack on I2C1)
+// LCD_ADDR (0x27), LCD_BACKLIGHT, LCD_ENABLE_BIT, LCD_CMD, LCD_DATA are defined in the header
+void LCD_init(void);
+void LCD_command(uint8_t cmd);
+void LCD_data(uint8_t data);
+void LCD_print(char *str);
+void LCD_setCursor(uint8_t col, uint8_t row);
+```
+
+> **Note:** The bus runs in standard mode (**100 kHz**), with SCL and SDA as open-drain AF pins (AF4, or AF9 for some SDA pins). Every write/read is a **blocking** busy-wait. One LCD character needs 6 I2C writes (high nibble + low nibble, each with an enable pulse), about **1.2 ms**, so writing a full 16x2 screen takes about 40 ms. Do not call LCD functions inside interrupt handlers.
+
+### I2C1_init() / I2C2_init() / I2C3_init()
+
+Configures the SCL/SDA pins (AF, open-drain, high speed, AF number chosen by the bus), enables the I2C clock (APB1), and sets the timing registers (`CR2.FREQ`, `CCR`, `TRISE`) for 100 kHz from PCLK1, then enables the peripheral.
+
+```c
+void I2C1_init(void);
+void I2C2_init(void);
+void I2C3_init(void);
+```
+
+| Bus | SCL | SDA |
+| --- | --- | --- |
+| I2C1 | PB_8 (AF4) | PB_9 (AF4) |
+| I2C2 | PB_10 (AF4) | PB_3 (AF9) |
+| I2C3 | PA_8 (AF4) | PC_9 (AF4) |
+
+**Example code**
+
+```c
+I2C1_init();     // SCL = PB_8, SDA = PB_9
+```
+
+### I2C1_write() / I2C2_write() / I2C3_write()
+
+Sends one data byte to a 7-bit device address: START → address (write) → data → STOP. Stops at once on NACK, arbitration loss or bus error.
+
+```c
+int I2C1_write(uint8_t devAddr, uint8_t data);
+```
+
+**Parameters**
+
+* **devAddr**: 7-bit device address (e.g. `LCD_ADDR` = 0x27)
+* **data**: byte to send
+
+**Returns**: `0` on success, `-1` on NACK / bus error / timeout
+
+**Example code**
+
+```c
+int err = I2C1_write(LCD_ADDR, LCD_BACKLIGHT);   // does the LCD answer?
+if(err) printf("LCD NOT found\r\n");
+```
+
+### I2C1_read() / I2C2_read() / I2C3_read()
+
+Reads `len` bytes from a device (master receiver), handling the 1-, 2- and 3+-byte cases of the reference manual (NACK on the last byte, STOP at the right moment).
+
+```c
+int I2C1_read(uint8_t devAddr, uint8_t *buf, uint32_t len);
+```
+
+**Parameters**
+
+* **devAddr**: 7-bit device address
+* **buf**: buffer for the received bytes
+* **len**: number of bytes to read
+
+**Returns**: `0` on success, `-1` on error
+
+### LCD_init()
+
+Initializes the HD44780 LCD in 4-bit mode: waits 50 ms for power-up, then sends `0x33`, `0x32` (switch to 4-bit), `0x28` (2 lines, 5x8 dots), `0x0C` (display on, cursor off), `0x06` (increment cursor), `0x01` (clear), and waits 2 ms. Call `I2C1_init()` first.
+
+```c
+void LCD_init(void);
+```
+
+**Example code**
+
+```c
+I2C1_init();
+LCD_init();
+```
+
+### LCD_command() / LCD_data()
+
+Send one command byte / one character to the LCD (two 4-bit nibbles, each with an enable pulse).
+
+```c
+void LCD_command(uint8_t cmd);
+void LCD_data(uint8_t data);
+```
+
+**Example code**
+
+```c
+LCD_command(0x01);   // clear display (slow, about 1.5 ms)
+LCD_data('A');
+```
+
+### LCD_setCursor()
+
+Moves the cursor to column `col` of row `row` (DDRAM addresses 0x00, 0x40, 0x14, 0x54 for rows 0 ~ 3; a 16x2 LCD uses rows 0 and 1).
+
+```c
+void LCD_setCursor(uint8_t col, uint8_t row);
+```
+
+**Parameters**
+
+* **col**: column, 0 ~ 15
+* **row**: row, 0 ~ 1 (16x2)
+
+### LCD_print()
+
+Prints a null-terminated string from the current cursor position.
+
+```c
+void LCD_print(char *str);
+```
+
+**Parameters**
+
+* **str**: string to print
+
+**Example code**
+
+```c
+char lcd_line[20];
+sprintf(lcd_line, "%2d\xDF %2d%% LED %3d%%", temp, humi, duty);   // 0xDF = degree sign
+LCD_setCursor(0, 1);
+LCD_print(lcd_line);
+```
+
+> **Note:** To update a line without flicker, overwrite it with a string padded to 16 characters instead of clearing the screen with `LCD_command(0x01)`. Characters such as `°` typed in a UTF-8 source file do not display correctly; use the HD44780 code (`\xDF` for the degree sign).
