@@ -2275,29 +2275,62 @@ int DHT11_humidity(void);
 `#include "ecI2C2.h"`
 
 ```c
-// I2C bus
-void I2C1_init(void);                                       // PB_8 = SCL, PB_9 = SDA
-int  I2C1_write(uint8_t devAddr, uint8_t data);
-int  I2C1_read(uint8_t devAddr, uint8_t *buf, uint32_t len);
+#ifndef __EC_I2C2_H
+#define __EC_I2C2_H
 
-void I2C2_init(void);                                       // PB_10 = SCL, PB_3 = SDA (AF9)
-int  I2C2_write(uint8_t devAddr, uint8_t data);
-int  I2C2_read(uint8_t devAddr, uint8_t *buf, uint32_t len);
+#include "stm32f411xe.h"
+#include "ecGPIO2.h"
+#include "ecRCC2.h"
 
-void I2C3_init(void);                                       // PA_8 = SCL, PC_9 = SDA
-int  I2C3_write(uint8_t devAddr, uint8_t data);
-int  I2C3_read(uint8_t devAddr, uint8_t *buf, uint32_t len);
+// Pin / AF per bus on the F411R(C-E)T package. Note PB11 does not exist here,
+// so I2C2 cannot use the PB10/PB11 pair, and I2C2_SDA is AF9, not AF4.
+//   I2C1 : SCL PB_8  (AF4)   SDA PB_9 (AF4)   = the board's SCL/SDA header
+//   I2C2 : SCL PB_10 (AF4)   SDA PB_3 or PB_9 (AF9)
+//   I2C3 : SCL PA_8  (AF4)   SDA PC_9 (AF4)
+// SCL/SDA are open-drain with no internal pull-up : the bus needs external
+// pull-ups, which a breakout module normally carries.
 
-// I2C LCD (16x2, PCF8574 backpack on I2C1)
-// LCD_ADDR (0x27), LCD_BACKLIGHT, LCD_ENABLE_BIT, LCD_CMD, LCD_DATA are defined in the header
+// LM75-family temperature sensor (LM75B / TMP75)
+#define LM75_ADDR      0x4C
+#define LM75_REG_TEMP  0x00
+#define LM75_REG_CONF  0x01
+
+// Common LCD definitions
+#define LCD_ADDR       0x27
+#define LCD_BACKLIGHT  0x08
+#define LCD_ENABLE_BIT 0x04
+#define LCD_CMD        0x00
+#define LCD_DATA       0x01
+
+// ======== I2C1 / I2C2 / I2C3 Functions ========
+// Standard mode 100 kHz. CR2/CCR/TRISE are derived from EC_SYSCLK, so the
+// bus rate follows RCC_PLL_init() (PCLK1 42MHz) or RCC_HSI_init() (16MHz).
+void I2C1_init(void);
+void I2C2_init(void);
+void I2C3_init(void);
+
+// Returns 0 on success, -1 on timeout (no device, stuck bus, no pull-ups).
+int I2C1_write(uint8_t devAddr, uint8_t data);
+int I2C2_write(uint8_t devAddr, uint8_t data);
+int I2C3_write(uint8_t devAddr, uint8_t data);
+
+// Reads len bytes from the device's current register pointer.
+// Returns 0 on success, -1 on timeout or NACK.
+int I2C1_read(uint8_t devAddr, uint8_t *buf, uint32_t len);
+int I2C2_read(uint8_t devAddr, uint8_t *buf, uint32_t len);
+int I2C3_read(uint8_t devAddr, uint8_t *buf, uint32_t len);
+
+// ======== LCD Functions (Using I2C1 by default) ========
 void LCD_init(void);
 void LCD_command(uint8_t cmd);
 void LCD_data(uint8_t data);
 void LCD_print(char *str);
 void LCD_setCursor(uint8_t col, uint8_t row);
+
+#endif
 ```
 
-> **Note:** The bus runs in standard mode (**100 kHz**), with SCL and SDA as open-drain AF pins (AF4, or AF9 for some SDA pins). Every write/read is a **blocking** busy-wait. One LCD character needs 6 I2C writes (high nibble + low nibble, each with an enable pulse), about **1.2 ms**, so writing a full 16x2 screen takes about 40 ms. Do not call LCD functions inside interrupt handlers.
+> **Note:** The bus runs in standard mode (**100 kHz**), with SCL and SDA as open-drain AF pins (AF4, or AF9 for the I2C2 SDA). There is **no internal pull-up**: the bus needs external pull-ups, which a breakout module (such as the LCD backpack) normally carries. The LCD functions always use **I2C1**, and the LCD constants are `LCD_ADDR = 0x27`, `LCD_BACKLIGHT = 0x08`, `LCD_ENABLE_BIT = 0x04`, `LCD_CMD = 0x00`, `LCD_DATA = 0x01`. Every write/read is a **blocking** busy-wait. One LCD character needs 6 I2C writes (high nibble + low nibble, each with an enable pulse), about **1.2 ms**, so writing a full 16x2 screen takes about 40 ms. Do not call LCD functions inside interrupt handlers.
 
 ### I2C1_init() / I2C2_init() / I2C3_init()
 
@@ -2312,7 +2345,7 @@ void I2C3_init(void);
 | Bus | SCL | SDA |
 | --- | --- | --- |
 | I2C1 | PB_8 (AF4) | PB_9 (AF4) |
-| I2C2 | PB_10 (AF4) | PB_3 (AF9) |
+| I2C2 | PB_10 (AF4) | PB_3 (AF9) — `I2C2_init()` uses PB_3; PB_9 (AF9) is also possible |
 | I2C3 | PA_8 (AF4) | PC_9 (AF4) |
 
 **Example code**
@@ -2334,7 +2367,7 @@ int I2C1_write(uint8_t devAddr, uint8_t data);
 * **devAddr**: 7-bit device address (e.g. `LCD_ADDR` = 0x27)
 * **data**: byte to send
 
-**Returns**: `0` on success, `-1` on NACK / bus error / timeout
+**Returns**: `0` on success, `-1` on timeout or error (no device, NACK, stuck bus, missing pull-ups)
 
 **Example code**
 
@@ -2357,7 +2390,20 @@ int I2C1_read(uint8_t devAddr, uint8_t *buf, uint32_t len);
 * **buf**: buffer for the received bytes
 * **len**: number of bytes to read
 
-**Returns**: `0` on success, `-1` on error
+**Returns**: `0` on success, `-1` on timeout or NACK
+
+Reads from the device's **current register pointer**. To read a specific register, write the register address first with `I2Cx_write()`, then call `I2Cx_read()`.
+
+**Example code** (LM75 temperature sensor)
+
+```c
+uint8_t raw[2];
+I2C1_write(LM75_ADDR, LM75_REG_TEMP);              // set the register pointer to TEMP
+if(I2C1_read(LM75_ADDR, raw, 2) == 0){
+    int16_t t = (int16_t)((raw[0] << 8) | raw[1]); // 16-bit two's complement, 1/256 degC
+    float tempC = t / 256.0f;
+}
+```
 
 ### LCD_init()
 
