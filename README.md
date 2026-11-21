@@ -23,7 +23,7 @@ MCU:  STM32F411RE (Nucleo-64)
 
 ---
 
-[TOC]
+## Table of Contents
 
   * [GPIO Digital In/Out](#gpio-digital-inout)
     + [Header File](#header-file)
@@ -170,7 +170,8 @@ MCU:  STM32F411RE (Nucleo-64)
 // OSPEEDR
 #define LOW_SPEED		0x00
 #define MEDIUM_SPEED	0x01
-#define FAST_SPEED		0x10
+#define FAST_SPEED		0x02
+#define HIGH_SPEED		0x03
 
 // OTYPER
 #define PUSH_PULL 		0	// Push-pull
@@ -291,7 +292,9 @@ void GPIO_ospeed(PinName_t pinName, uint32_t speed);
 **Parameters**
 
 * **pinName**: pin to configure
-* **speed**: `LOW_SPEED` (0x00), `MEDIUM_SPEED` (0x01), `FAST_SPEED` (0x10)
+* **speed**: `LOW_SPEED` (0x00), `MEDIUM_SPEED` (0x01), `FAST_SPEED` (0x02), `HIGH_SPEED` (0x03)
+
+> OSPEEDR uses 2 bits per pin, and `GPIO_ospeed()` writes `speed << (2*pin)`. The value must therefore be 0–3; a larger value (e.g. `0x10`) would overwrite the speed bits of other pins.
 
 **Example code**
 
@@ -845,6 +848,17 @@ void stepper_stop(void);
 
 * (none)
 
+**Example code**
+
+```c
+void EXTI15_10_IRQHandler(void) {
+    if (is_pending_EXTI(BUTTON_PIN)) {
+        stepper_stop();
+        clear_pending_EXTI(BUTTON_PIN);
+    }
+}
+```
+
 ### getStepsPerRev()
 
 Returns the number of FSM steps needed for one physical revolution in the mode last passed to `stepper_init()` — `STEP_PER_REV` for `FULL`, `STEP_PER_REV*2` for `HALF`. Meant to be used in place of hard-coding `STEP_PER_REV` (or `STEP_PER_REV*2`) when computing a step count for `stepper_step()`, so that `main()` does not need to know which mode is active.
@@ -868,17 +882,6 @@ stepper_speed(1);   // 1 rpm — correct in either mode, no manual compensation 
 uint32_t rev = 1;
 uint32_t steps = getStepsPerRev()*rev;   // automatically 2048 (FULL) or 4096 (HALF)
 stepper_step(steps, DIR_CW);
-```
-
-**Example code**
-
-```c
-void EXTI15_10_IRQHandler(void) {
-    if (is_pending_EXTI(BUTTON_PIN)) {
-        stepper_stop();
-        clear_pending_EXTI(BUTTON_PIN);
-    }
-}
 ```
 
 ------
